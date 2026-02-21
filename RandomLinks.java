@@ -1,3 +1,7 @@
+// Created by : Martin Phalane 
+// Date Created: 2024-06-01
+
+
 public class RandomLinks {
     public static void main(String[] args) {
 
@@ -25,8 +29,9 @@ public class RandomLinks {
         System.out.println("<html lang=\"en\">");
         System.out.println("<head>");
         System.out.println("  <meta charset=\"UTF-8\">");
+        // Cache control to prevent browser caching of the page..
         System.out.println("  <meta http-equiv=\"Cache-Control\" content=\"no-cache, no-store, must-revalidate\">");
-        System.out.println("  <title>Pick the Larger Number</title>");
+        System.out.println("  <title>Martin Phalane's Random Links Page</title>");
         System.out.println("</head>");
         System.out.println("<body>");
         System.out.println("  <h1>Click the larger number</h1>");
