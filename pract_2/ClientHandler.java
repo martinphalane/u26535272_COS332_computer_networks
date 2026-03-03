@@ -1,0 +1,346 @@
+import java.io.*;
+import java.net.*;
+import java.util.*;
+
+/**
+ * Handles one connected Telnet client in its own thread.
+ * Provides an interactive, ANSI-coloured menu for managing appointments.
+ *
+ * The server echoes every character so the session works correctly
+ * regardless of whether the client has localecho on or off.
+ */
+public class ClientHandler implements Runnable {
+
+    // Shared database across all client threads
+    private static final AppointmentDatabase DB = new AppointmentDatabase();
+
+    private static final int WIDTH = 70;
+
+    private final Socket socket;
+    private Terminal term;
+    private BufferedInputStream in;
+
+    public ClientHandler(Socket socket) {
+        this.socket = socket;
+    }
+
+    // -------------------------------------------------------
+    // Entry point
+    // -------------------------------------------------------
+
+    @Override
+    public void run() {
+        try {
+            in   = new BufferedInputStream(socket.getInputStream());
+            term = new Terminal(socket.getOutputStream());
+
+            // Negotiate Telnet: tell the client we will echo (WILL ECHO = 0xFF 0xFB 0x01)
+            // and suppress go-ahead (WILL SGA = 0xFF 0xFB 0x03)
+            socket.getOutputStream().write(new byte[]{
+                (byte)0xFF, (byte)0xFB, 0x01,   // IAC WILL ECHO
+                (byte)0xFF, (byte)0xFB, 0x03    // IAC WILL SGA
+            });
+            socket.getOutputStream().flush();
+
+            showMainMenu();
+        } catch (IOException e) {
+            System.out.println("[Server] Client disconnected: " + socket.getInetAddress());
+        } finally {
+            try { socket.close(); } catch (IOException ignored) {}
+        }
+    }
+
+    // -------------------------------------------------------
+    // Main menu
+    // -------------------------------------------------------
+
+    private void showMainMenu() throws IOException {
+        while (true) {
+            term.drawTitleBar("  APPOINTMENT MANAGER  ", WIDTH);
+            term.moveTo(3, 1);
+            term.printlnColour(Terminal.YELLOW + Terminal.BOLD, " Main Menu");
+            term.println();
+            term.printlnColour(Terminal.GREEN,  "  [1]  View all appointments");
+            term.printlnColour(Terminal.GREEN,  "  [2]  Add appointment");
+            term.printlnColour(Terminal.GREEN,  "  [3]  Search appointments");
+            term.printlnColour(Terminal.GREEN,  "  [4]  Delete appointment");
+            term.printlnColour(Terminal.RED,    "  [Q]  Quit");
+            term.println();
+            term.horizontalRule(WIDTH, '-');
+            term.print(Terminal.CYAN + "  Choice: " + Terminal.RESET);
+
+            char choice = readChar();
+            term.println();   // move past the echoed character
+
+            switch (Character.toUpperCase(choice)) {
+                case '1': viewAll();   break;
+                case '2': addNew();    break;
+                case '3': search();    break;
+                case '4': delete();    break;
+                case 'Q':
+                    term.clearScreen();
+                    term.moveTo(5, 1);
+                    term.printlnColour(Terminal.YELLOW, "  Goodbye! Session ended.");
+                    term.println();
+                    return;
+                default:
+                    term.printlnColour(Terminal.RED, "  Unknown option. Try again.");
+                    pause(1000);
+            }
+        }
+    }
+
+    // -------------------------------------------------------
+    // View all
+    // -------------------------------------------------------
+
+    private void viewAll() throws IOException {
+        term.drawTitleBar("  ALL APPOINTMENTS  ", WIDTH);
+        term.moveTo(3, 1);
+        List<Appointment> list = DB.getAll();
+        if (list.isEmpty()) {
+            term.printlnColour(Terminal.YELLOW, "  No appointments stored yet.");
+        } else {
+            printTableHeader();
+            int i = 1;
+            for (Appointment a : list) {
+                printRow(i++, a);
+            }
+        }
+        pressEnterToContinue();
+    }
+
+    // -------------------------------------------------------
+    // Add
+    // -------------------------------------------------------
+
+    private void addNew() throws IOException {
+        term.drawTitleBar("  ADD APPOINTMENT  ", WIDTH);
+        term.moveTo(3, 1);
+
+        term.printlnColour(Terminal.CYAN, "  Enter appointment details (blank date to cancel)");
+        term.println();
+
+        String date   = prompt("  Date   (dd/mm/yyyy): ");
+        if (date.isEmpty()) return;
+        String time   = prompt("  Time   (HH:MM)     : ");
+        String person = prompt("  With                : ");
+        String notes  = prompt("  Notes               : ");
+
+        if (time.isEmpty() || person.isEmpty()) {
+            term.printlnColour(Terminal.RED, "  Time and person are required. Cancelled.");
+            pause(1200);
+            return;
+        }
+
+        DB.add(new Appointment(date, time, person, notes));
+        term.println();
+        term.printlnColour(Terminal.GREEN, "  ✔  Appointment saved!");
+        pause(1200);
+    }
+
+    // -------------------------------------------------------
+    // Search
+    // -------------------------------------------------------
+
+    private void search() throws IOException {
+        term.drawTitleBar("  SEARCH APPOINTMENTS  ", WIDTH);
+        term.moveTo(3, 1);
+
+        String query = prompt("  Search (date / name / notes): ");
+        if (query.isEmpty()) return;
+
+        term.println();
+        List<Appointment> results = DB.search(query);
+        if (results.isEmpty()) {
+            term.printlnColour(Terminal.YELLOW, "  No matches found for: " + query);
+        } else {
+            term.printlnColour(Terminal.GREEN, "  Found " + results.size() + " result(s):");
+            term.println();
+            printTableHeader();
+            int i = 1;
+            for (Appointment a : results) {
+                printRow(i++, a);
+            }
+        }
+        pressEnterToContinue();
+    }
+
+    // -------------------------------------------------------
+    // Delete
+    // -------------------------------------------------------
+
+    private void delete() throws IOException {
+        term.drawTitleBar("  DELETE APPOINTMENT  ", WIDTH);
+        term.moveTo(3, 1);
+
+        List<Appointment> list = DB.getAll();
+        if (list.isEmpty()) {
+            term.printlnColour(Terminal.YELLOW, "  No appointments to delete.");
+            pause(1200);
+            return;
+        }
+
+        printTableHeader();
+        int i = 1;
+        for (Appointment a : list) {
+            printRow(i++, a);
+        }
+        term.println();
+
+        String numStr = prompt("  Enter number to delete (blank to cancel): ");
+        if (numStr.isEmpty()) return;
+
+        try {
+            int num = Integer.parseInt(numStr.trim());
+            if (DB.delete(num)) {
+                term.printlnColour(Terminal.GREEN, "  ✔  Appointment #" + num + " deleted.");
+            } else {
+                term.printlnColour(Terminal.RED, "  Invalid number.");
+            }
+        } catch (NumberFormatException e) {
+            term.printlnColour(Terminal.RED, "  Please enter a valid number.");
+        }
+        pause(1200);
+    }
+
+    // -------------------------------------------------------
+    // Table helpers
+    // -------------------------------------------------------
+
+    private void printTableHeader() {
+        term.printlnColour(Terminal.BOLD + Terminal.WHITE,
+            String.format("  %-4s %-12s %-6s %-18s %s",
+                "#", "Date", "Time", "Person", "Notes"));
+        term.printlnColour(Terminal.CYAN,
+            "  " + repeat('-', WIDTH - 2));
+    }
+
+    private void printRow(int idx, Appointment a) {
+        String colour = (idx % 2 == 0) ? Terminal.WHITE : Terminal.YELLOW;
+        term.printlnColour(colour,
+            String.format("  %-4d %-12s %-6s %-18s %s",
+                idx,
+                a.getDate(),
+                a.getTime(),
+                truncate(a.getPerson(), 18),
+                truncate(a.getNotes(), 25)));
+    }
+
+    // -------------------------------------------------------
+    // Input helpers
+    // -------------------------------------------------------
+
+    /**
+     * Read a single character from the stream, skipping Telnet IAC sequences
+     * and filtering out non-printable control codes.
+     * The character is echoed back so the user sees what they typed.
+     */
+    private char readChar() throws IOException {
+        while (true) {
+            int b = in.read();
+            if (b == -1) throw new IOException("Client disconnected");
+
+            // Handle Telnet IAC (0xFF) negotiation — skip 3 bytes
+            if (b == 0xFF) {
+                in.read(); // command byte
+                in.read(); // option byte
+                continue;
+            }
+
+            if (b < 32 || b > 126) continue; // skip control characters
+
+            char c = (char) b;
+            // Echo the character back
+            term.print(String.valueOf(c));
+            return c;
+        }
+    }
+
+    /**
+     * Read a full line. Handles backspace, echo, and CR/LF termination.
+     * Telnet sends CR+NUL or CR+LF for Enter.
+     */
+    private String readLine() throws IOException {
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            int b = in.read();
+            if (b == -1) throw new IOException("Client disconnected");
+
+            // Skip Telnet IAC negotiation sequences
+            if (b == 0xFF) {
+                in.read();
+                in.read();
+                continue;
+            }
+
+            if (b == '\r' || b == '\n') {
+                // Absorb the paired LF or NUL that follows CR
+                if (b == '\r') {
+                    in.mark(1);
+                    int next = in.read();
+                    if (next != '\n' && next != 0) {
+                        // Not a paired char — put it back
+                        // BufferedInputStream supports mark/reset
+                        in.reset();
+                    }
+                }
+                term.println(); // move to next line on client
+                return sb.toString();
+            }
+
+            // Backspace (DEL = 127, BS = 8)
+            if (b == 127 || b == 8) {
+                if (sb.length() > 0) {
+                    sb.deleteCharAt(sb.length() - 1);
+                    // Move back, overwrite with space, move back again
+                    term.print("\b \b");
+                }
+                continue;
+            }
+
+            if (b >= 32 && b < 127) {
+                char c = (char) b;
+                sb.append(c);
+                term.print(String.valueOf(c)); // echo
+            }
+        }
+    }
+
+    /** Print a prompt then collect a line of input. */
+    private String prompt(String message) throws IOException {
+        term.print(Terminal.CYAN + message + Terminal.RESET);
+        return readLine().trim();
+    }
+
+    private void pressEnterToContinue() throws IOException {
+        term.println();
+        term.print(Terminal.CYAN + "  Press Enter to continue..." + Terminal.RESET);
+        // Drain until CR/LF
+        while (true) {
+            int b = in.read();
+            if (b == -1) throw new IOException("Client disconnected");
+            if (b == 0xFF) { in.read(); in.read(); continue; }
+            if (b == '\r' || b == '\n') { term.println(); return; }
+        }
+    }
+
+    // -------------------------------------------------------
+    // Utilities
+    // -------------------------------------------------------
+
+    private void pause(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
+    }
+
+    private String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    }
+
+    private String repeat(char c, int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) sb.append(c);
+        return sb.toString();
+    }
+}
