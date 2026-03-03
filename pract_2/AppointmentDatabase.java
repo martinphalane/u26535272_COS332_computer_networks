@@ -1,4 +1,5 @@
 import java.io.*;
+import java.text.*;
 import java.util.*;
 
 /**
@@ -30,7 +31,7 @@ public class AppointmentDatabase {
                 }
             }
         } catch (IOException e) {
-            // silently continue with empty list - no console output during demo
+            // silently continue with empty list
         }
     }
 
@@ -41,7 +42,7 @@ public class AppointmentDatabase {
                 pw.println(a.toFileLine());
             }
         } catch (IOException e) {
-            // silently ignore - no console output during demo
+            // silently ignore
         }
     }
 
@@ -75,8 +76,7 @@ public class AppointmentDatabase {
     }
 
     /**
-     * Delete the appointment at the given 1-based index
-     * (as shown to the user in the list).
+     * Delete the appointment at the given 1-based index.
      * Returns true on success, false if index is out of range.
      */
     public synchronized boolean delete(int oneBasedIndex) {
@@ -88,5 +88,56 @@ public class AppointmentDatabase {
 
     public synchronized int size() {
         return appointments.size();
+    }
+
+    /**
+     * Returns appointments occurring within the next 'days' days from today.
+     * Parses the stored date string in dd/mm/yyyy format.
+     * Appointments with unparseable dates are silently skipped.
+     */
+    public synchronized List<Appointment> getUpcoming(int days) {
+        List<Appointment> upcoming = new ArrayList<>();
+
+        // Get today at midnight and the cutoff date
+        Calendar today = Calendar.getInstance();
+        today.set(Calendar.HOUR_OF_DAY, 0);
+        today.set(Calendar.MINUTE, 0);
+        today.set(Calendar.SECOND, 0);
+        today.set(Calendar.MILLISECOND, 0);
+
+        Calendar cutoff = Calendar.getInstance();
+        cutoff.setTime(today.getTime());
+        cutoff.add(Calendar.DAY_OF_MONTH, days);
+
+        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
+        sdf.setLenient(false);
+
+        for (Appointment a : appointments) {
+            try {
+                Date apptDate = sdf.parse(a.getDate());
+                Calendar apptCal = Calendar.getInstance();
+                apptCal.setTime(apptDate);
+                apptCal.set(Calendar.HOUR_OF_DAY, 0);
+                apptCal.set(Calendar.MINUTE, 0);
+                apptCal.set(Calendar.SECOND, 0);
+                apptCal.set(Calendar.MILLISECOND, 0);
+
+                // Include if on or after today AND on or before cutoff
+                if (!apptCal.before(today) && !apptCal.after(cutoff)) {
+                    upcoming.add(a);
+                }
+            } catch (ParseException e) {
+                // Skip appointments with unrecognised date formats
+            }
+        }
+
+        // Sort by date then time
+        upcoming.sort((x, y) -> {
+            int dateCmp = x.getDate().compareTo(y.getDate());
+            if (dateCmp != 0) return dateCmp;
+            return x.getTime().compareTo(y.getTime());
+        });
+
+        return upcoming;
     }
 }

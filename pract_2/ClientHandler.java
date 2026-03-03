@@ -42,12 +42,58 @@ public class ClientHandler implements Runnable {
             });
             socket.getOutputStream().flush();
 
+            showReminders();
             showMainMenu();
         } catch (IOException e) {
-            System.out.println("[Server] Client disconnected: " + socket.getInetAddress());
+            // client disconnected - no console output during demo
         } finally {
             try { socket.close(); } catch (IOException ignored) {}
         }
+    }
+
+    // -------------------------------------------------------
+    // Upcoming reminders — shown once on connect
+    // -------------------------------------------------------
+
+    private void showReminders() throws IOException {
+        List<Appointment> upcoming = DB.getUpcoming(7);
+        if (upcoming.isEmpty()) return;
+
+        term.clearScreen();
+        term.moveTo(1, 1);
+
+        // Header banner
+        term.printlnColour(Terminal.BG_BLUE + Terminal.BOLD + Terminal.WHITE,
+            centre("  UPCOMING APPOINTMENTS — NEXT 7 DAYS  ", WIDTH));
+        term.println();
+
+        // Warning icon line
+        term.printlnColour(Terminal.YELLOW + Terminal.BOLD,
+            "  You have " + upcoming.size()
+            + (upcoming.size() == 1 ? " appointment" : " appointments")
+            + " coming up:");
+        term.println();
+
+        // Table header
+        term.printlnColour(Terminal.BOLD + Terminal.WHITE,
+            String.format("  %-12s %-6s %-20s %s", "Date", "Time", "Person", "Notes"));
+        term.printlnColour(Terminal.CYAN, "  " + repeat('-', WIDTH - 2));
+
+        // Each upcoming appointment
+        for (int i = 0; i < upcoming.size(); i++) {
+            Appointment a = upcoming.get(i);
+            String colour = (i % 2 == 0) ? Terminal.YELLOW : Terminal.WHITE;
+            term.printlnColour(colour,
+                String.format("  %-12s %-6s %-20s %s",
+                    a.getDate(),
+                    a.getTime(),
+                    truncate(a.getPerson(), 20),
+                    truncate(a.getNotes(), 25)));
+        }
+
+        term.println();
+        term.printlnColour(Terminal.CYAN, "  " + repeat('-', WIDTH - 2));
+        pressEnterToContinue();
     }
 
     // -------------------------------------------------------
@@ -343,4 +389,11 @@ public class ClientHandler implements Runnable {
         for (int i = 0; i < n; i++) sb.append(c);
         return sb.toString();
     }
+
+    private String centre(String s, int width) {
+        if (s.length() >= width) return s;
+        int pad = (width - s.length()) / 2;
+        return repeat(' ', pad) + s + repeat(' ', width - pad - s.length());
+    }
+
 }
