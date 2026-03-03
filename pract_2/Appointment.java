@@ -4,7 +4,7 @@
 public class Appointment {
     private String date;    // dd/mm/yyyy
     private String time;    // HH:MM
-    private String person;  // Who the appointment is with
+    private String person;  // The customer name
     private String notes;   // Additional notes / description
 
     public Appointment(String date, String time, String person, String notes) {

@@ -76,7 +76,7 @@ public class ClientHandler implements Runnable {
 
         // Table header
         term.printlnColour(Terminal.BOLD + Terminal.WHITE,
-            String.format("  %-12s %-6s %-20s %s", "Date", "Time", "Person", "Notes"));
+            String.format("  %-12s %-6s %-20s %s", "Date", "Time", "Customer", "Notes"));
         term.printlnColour(Terminal.CYAN, "  " + repeat('-', WIDTH - 2));
 
         // Each upcoming appointment
@@ -110,6 +110,7 @@ public class ClientHandler implements Runnable {
             term.printlnColour(Terminal.GREEN,  "  [2]  Add appointment");
             term.printlnColour(Terminal.GREEN,  "  [3]  Search appointments");
             term.printlnColour(Terminal.GREEN,  "  [4]  Delete appointment");
+            term.printlnColour(Terminal.GREEN,  "  [5]  Edit appointment");
             term.printlnColour(Terminal.RED,    "  [Q]  Quit");
             term.println();
             term.horizontalRule(WIDTH, '-');
@@ -119,19 +120,22 @@ public class ClientHandler implements Runnable {
             term.println();   // move past the echoed character
 
             switch (Character.toUpperCase(choice)) {
-                case '1': viewAll();   break;
-                case '2': addNew();    break;
-                case '3': search();    break;
-                case '4': delete();    break;
-                case 'Q':
+                case '1' -> viewAll();
+                case '2' -> addNew();
+                case '3' -> search();
+                case '4' -> delete();
+                case '5' -> edit();
+                case 'Q' -> {
                     term.clearScreen();
                     term.moveTo(5, 1);
                     term.printlnColour(Terminal.YELLOW, "  Goodbye! Session ended.");
                     term.println();
                     return;
-                default:
+                }
+                default -> {
                     term.printlnColour(Terminal.RED, "  Unknown option. Try again.");
                     pause(1000);
+                }
             }
         }
     }
@@ -143,10 +147,12 @@ public class ClientHandler implements Runnable {
     private void viewAll() throws IOException {
         term.drawTitleBar("  ALL APPOINTMENTS  ", WIDTH);
         term.moveTo(3, 1);
-        List<Appointment> list = DB.getAll();
+        List<Appointment> list = DB.getAllSorted();
         if (list.isEmpty()) {
             term.printlnColour(Terminal.YELLOW, "  No appointments stored yet.");
         } else {
+            term.printlnColour(Terminal.CYAN, "  Sorted by date and time");
+            term.println();
             printTableHeader();
             int i = 1;
             for (Appointment a : list) {
@@ -170,11 +176,11 @@ public class ClientHandler implements Runnable {
         String date   = prompt("  Date   (dd/mm/yyyy): ");
         if (date.isEmpty()) return;
         String time   = prompt("  Time   (HH:MM)     : ");
-        String person = prompt("  With                : ");
+        String person = prompt("  Customer name      : ");
         String notes  = prompt("  Notes               : ");
 
         if (time.isEmpty() || person.isEmpty()) {
-            term.printlnColour(Terminal.RED, "  Time and person are required. Cancelled.");
+            term.printlnColour(Terminal.RED, "  Time and customer name are required. Cancelled.");
             pause(1200);
             return;
         }
@@ -239,15 +245,108 @@ public class ClientHandler implements Runnable {
 
         try {
             int num = Integer.parseInt(numStr.trim());
-            if (DB.delete(num)) {
+            Appointment toDelete = DB.get(num);
+            if (toDelete == null) {
+                term.printlnColour(Terminal.RED, "  Invalid number.");
+                pause(1200);
+                return;
+            }
+
+            // Show the appointment and ask for confirmation
+            term.println();
+            term.printlnColour(Terminal.YELLOW + Terminal.BOLD, "  About to delete:");
+            term.printlnColour(Terminal.WHITE, String.format("  %s at %s with %s",
+                toDelete.getDate(), toDelete.getTime(), toDelete.getPerson()) + "  —  " + truncate(toDelete.getNotes(), 20));
+            term.println();
+            term.print(Terminal.RED + Terminal.BOLD + "  Confirm delete? (Y/N): " + Terminal.RESET);
+
+            char confirm = readChar();
+            term.println();
+
+            if (Character.toUpperCase(confirm) == 'Y') {
+                DB.delete(num);
                 term.printlnColour(Terminal.GREEN, "  ✔  Appointment #" + num + " deleted.");
             } else {
-                term.printlnColour(Terminal.RED, "  Invalid number.");
+                term.printlnColour(Terminal.YELLOW, "  Cancelled — no changes made.");
             }
         } catch (NumberFormatException e) {
             term.printlnColour(Terminal.RED, "  Please enter a valid number.");
         }
-        pause(1200);
+        pause(1500);
+    }
+
+
+    // -------------------------------------------------------
+    // Edit
+    // -------------------------------------------------------
+
+    private void edit() throws IOException {
+        term.drawTitleBar("  EDIT APPOINTMENT  ", WIDTH);
+        term.moveTo(3, 1);
+
+        List<Appointment> list = DB.getAll();
+        if (list.isEmpty()) {
+            term.printlnColour(Terminal.YELLOW, "  No appointments to edit.");
+            pause(1200);
+            return;
+        }
+
+        printTableHeader();
+        int i = 1;
+        for (Appointment a : list) {
+            printRow(i++, a);
+        }
+        term.println();
+
+        String numStr = prompt("  Enter number to edit (blank to cancel): ");
+        if (numStr.isEmpty()) return;
+
+        int num;
+        try {
+            num = Integer.parseInt(numStr.trim());
+        } catch (NumberFormatException e) {
+            term.printlnColour(Terminal.RED, "  Please enter a valid number.");
+            pause(1200);
+            return;
+        }
+
+        Appointment existing = DB.get(num);
+        if (existing == null) {
+            term.printlnColour(Terminal.RED, "  Invalid number.");
+            pause(1200);
+            return;
+        }
+
+        // Show current values and let user edit field by field
+        // Pressing Enter on a blank line keeps the existing value
+        term.println();
+        term.printlnColour(Terminal.CYAN, "  Press Enter on any field to keep the current value.");
+        term.println();
+
+        term.printlnColour(Terminal.WHITE, "  Current date   : " + existing.getDate());
+        String date = prompt("  New date        (dd/mm/yyyy): ");
+        if (date.isEmpty()) date = existing.getDate();
+
+        term.printlnColour(Terminal.WHITE, "  Current time   : " + existing.getTime());
+        String time = prompt("  New time        (HH:MM)     : ");
+        if (time.isEmpty()) time = existing.getTime();
+
+        term.printlnColour(Terminal.WHITE, "  Current customer : " + existing.getPerson());
+        String person = prompt("  New customer name          : ");
+        if (person.isEmpty()) person = existing.getPerson();
+
+        term.printlnColour(Terminal.WHITE, "  Current notes  : " + existing.getNotes());
+        String notes = prompt("  New notes                   : ");
+        if (notes.isEmpty()) notes = existing.getNotes();
+
+        Appointment updated = new Appointment(date, time, person, notes);
+        if (DB.edit(num, updated)) {
+            term.println();
+            term.printlnColour(Terminal.GREEN, "  ✔  Appointment #" + num + " updated successfully.");
+        } else {
+            term.printlnColour(Terminal.RED, "  Failed to update appointment.");
+        }
+        pause(1500);
     }
 
     // -------------------------------------------------------
@@ -257,7 +356,7 @@ public class ClientHandler implements Runnable {
     private void printTableHeader() {
         term.printlnColour(Terminal.BOLD + Terminal.WHITE,
             String.format("  %-4s %-12s %-6s %-18s %s",
-                "#", "Date", "Time", "Person", "Notes"));
+                "#", "Date", "Time", "Customer", "Notes"));
         term.printlnColour(Terminal.CYAN,
             "  " + repeat('-', WIDTH - 2));
     }

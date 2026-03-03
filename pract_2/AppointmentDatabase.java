@@ -140,4 +140,51 @@ public class AppointmentDatabase {
 
         return upcoming;
     }
+
+    /**
+     * Replace the appointment at the given 1-based index with a new one.
+     * Returns true on success, false if index is out of range.
+     */
+    public synchronized boolean edit(int oneBasedIndex, Appointment updated) {
+        if (oneBasedIndex < 1 || oneBasedIndex > appointments.size()) return false;
+        appointments.set(oneBasedIndex - 1, updated);
+        save();
+        return true;
+    }
+
+    /**
+     * Return a single appointment by 1-based index, or null if out of range.
+     */
+    public synchronized Appointment get(int oneBasedIndex) {
+        if (oneBasedIndex < 1 || oneBasedIndex > appointments.size()) return null;
+        return appointments.get(oneBasedIndex - 1);
+    }
+
+
+    /**
+     * Returns all appointments sorted chronologically by date then time.
+     * Appointments with unparseable dates are sorted to the end.
+     */
+    public synchronized List<Appointment> getAllSorted() {
+        List<Appointment> sorted = new ArrayList<>(appointments);
+        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
+        sdf.setLenient(false);
+
+        sorted.sort((x, y) -> {
+            try {
+                Date dx = sdf.parse(x.getDate());
+                Date dy = sdf.parse(y.getDate());
+                int dateCmp = dx.compareTo(dy);
+                if (dateCmp != 0) return dateCmp;
+                // Same date — sort by time string (HH:MM compares lexicographically)
+                return x.getTime().compareTo(y.getTime());
+            } catch (ParseException e) {
+                // Unparseable dates sort to the end
+                return 1;
+            }
+        });
+
+        return sorted;
+    }
+
 }
